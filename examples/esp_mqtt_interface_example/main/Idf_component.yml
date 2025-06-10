@@ -3,7 +3,7 @@ dependencies:
     version: "*"
     # for local developmente, use the local
     # copy of the component
-    override_path: "../../../"
+    # override_path: "../../../"
   tuliocharles/esp_wifi_interface:
     version: "*"
   #protocol_examples_common:

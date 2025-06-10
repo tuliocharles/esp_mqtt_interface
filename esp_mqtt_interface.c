@@ -9,18 +9,16 @@
 #include "esp_system.h"
 #include "esp_event.h"
 
-
 typedef struct esp_mqtt_interface_t esp_mqtt_interface_t;
 
 struct esp_mqtt_interface_t{
     char *id;
-    char *uri;
-    char *topic_received;  // Ponteiro para o tópico
-    char *data_received;   // Ponteiro para os dados
+    char uri[128];
     esp_mqtt_client_handle_t client;
-} ;
+    esp_mqtt_interface_cb_t s_callback; // Callback para eventos MQTT
+};
 
-esp_mqtt_interface_handle_t esp_mqtt_interface_handle = NULL;
+static esp_mqtt_interface_handle_t esp_mqtt_interface_handle = NULL;
 
 static const char  *TAGMQTT = "MQTTProtocol";
 
@@ -51,10 +49,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAGMQTT, "MQTT_EVENT_CONNECTED");
-        msg_id = esp_mqtt_client_publish(esp_mqtt_interface_handle->client, "/topic/qos1", "data_3", 0, 1, 0);
-        //ESP_LOGI(TAGMQTT, "sent publish successful, msg_id=%d", msg_id);
-
-        ESP_LOGI(TAGMQTT, "sent subscribe successful, msg_id=%d", msg_id);
+        esp_mqtt_interface_handle->s_callback((esp_mqtt_event_id_t)event->event_id, NULL, NULL);
+            
 
         break;
     case MQTT_EVENT_DISCONNECTED:
@@ -77,7 +73,18 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         ESP_LOGI(TAGMQTT, "MQTT_EVENT_DATA");
         ESP_LOGI(TAGMQTT, "TOPIC=%.*s", event->topic_len, event->topic);
         ESP_LOGI(TAGMQTT, "DATA=%.*s", event->data_len, event->data);
-
+        if (esp_mqtt_interface_handle && esp_mqtt_interface_handle->s_callback) {
+            char *topic_received = strndup(event->topic, event->topic_len);
+            char *data_received = strndup(event->data, event->data_len);
+            
+            // Chamar o callback com os dados recebidos
+            esp_mqtt_interface_handle->s_callback((esp_mqtt_event_id_t)event->event_id, topic_received, data_received);
+            
+            // Liberar a memória alocada
+            free(topic_received);
+            free(data_received);
+        }
+        
         
         break;
     case MQTT_EVENT_ERROR:
@@ -96,7 +103,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     }
 }
 
-void MQTT_connection_init(mqtt_protocol_config_t *mqtt_protocol_config)
+void esp_mqtt_interface_init(esp_mqtt_interface_config_t *esp_mqtt_interface_config)
 {   
     
     esp_log_level_set("mqtt_client", ESP_LOG_VERBOSE);
@@ -111,17 +118,20 @@ void MQTT_connection_init(mqtt_protocol_config_t *mqtt_protocol_config)
     esp_mqtt_interface_t *esp_mqtt_interface = NULL;
 
     esp_mqtt_interface = calloc(1,sizeof(esp_mqtt_interface_t));
-    esp_mqtt_interface->uri = mqtt_protocol_config->uri;
-    esp_mqtt_interface->id = mqtt_protocol_config->id;
+
+    sprintf(esp_mqtt_interface->uri, "mqtt://%s:%s@%s:%d", 
+        esp_mqtt_interface_config->username, esp_mqtt_interface_config->password, esp_mqtt_interface_config->host, 
+        esp_mqtt_interface_config->port);
+    esp_mqtt_interface->id = esp_mqtt_interface_config->id;
 
     esp_mqtt_client_config_t mqtt_cfg = 
         {
-        .broker.address.uri = esp_mqtt_interface->uri,//"mqtt://192.168.1.5:1883",//",//"mqtt://192.168.3.23:1883",
+        .broker.address.uri = esp_mqtt_interface->uri,
         .credentials.client_id = esp_mqtt_interface->id,
     };
     
     esp_mqtt_interface->client = esp_mqtt_client_init(&mqtt_cfg);
-    /* The last argument may be used to pass data to the event handler, in this example mqtt_event_handler */
+  
     esp_mqtt_client_register_event(esp_mqtt_interface->client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
     esp_mqtt_client_start(esp_mqtt_interface->client);
     
@@ -130,7 +140,32 @@ void MQTT_connection_init(mqtt_protocol_config_t *mqtt_protocol_config)
 
 }
 
+void esp_mqtt_interface_register_cb(esp_mqtt_interface_cb_t cb){
+    esp_mqtt_interface_handle->s_callback = cb;
+    ESP_LOGI(TAGMQTT, "Callback registered at %p", cb);
+}
+
 
 void mqtt_protocol_change_uri (esp_mqtt_client_handle_t client, const char *uri){
     esp_mqtt_client_set_uri(client, uri);
+}
+
+void esp_mqtt_interface_publish(const char *topic, const char *data, int qos, int retain)
+{
+    if (esp_mqtt_interface_handle && esp_mqtt_interface_handle->client) {
+        int msg_id = esp_mqtt_client_publish(esp_mqtt_interface_handle->client, topic, data, 0, qos, retain);
+        ESP_LOGI(TAGMQTT, "sent publish successful, msg_id=%d", msg_id);
+    } else {
+        ESP_LOGE(TAGMQTT, "MQTT client not initialized");
+    }
+}
+
+void esp_mqtt_interface_subscribe(const char *topic, int qos)
+{
+    if (esp_mqtt_interface_handle && esp_mqtt_interface_handle->client) {
+        int msg_id = esp_mqtt_client_subscribe(esp_mqtt_interface_handle->client, topic, qos);
+        ESP_LOGI(TAGMQTT, "sent subscribe from interface successful, msg_id=%d", msg_id);
+    } else {
+        ESP_LOGE(TAGMQTT, "MQTT client not initialized");
+    }
 }
