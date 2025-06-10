@@ -6,8 +6,8 @@ dependencies:
     # override_path: "../../../"
   tuliocharles/esp_wifi_interface:
     version: "*"
-  #protocol_examples_common:
-  #  path: ${IDF_PATH}/examples/common_components/protocol_examples_common
+  protocol_examples_common:
+    path: ${IDF_PATH}/examples/common_components/protocol_examples_common
   espressif/esp_wifi_remote:
     version: ">=0.1.12"
     rules:
